@@ -177,7 +177,7 @@ footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
   <div class="wrap">
     <div class="eyebrow"><b>CUDA</b> · llama.cpp · GeForce MX230 · 2 GB · sm_61</div>
     <h1>Small LLMs on a 2&nbsp;GB GPU <em>the CUDA world left behind.</em></h1>
-    <p class="lead">A 2017 Pascal laptop GPU, measured against its own memory-bandwidth ceiling. Profiling
+    <p class="lead">A 2017-era Pascal laptop GPU, measured against its own memory-bandwidth ceiling. Profiling
     found a llama.cpp optimization that slows this chip down (now reported upstream), and hand-written
     DP4A kernels took Qwen2.5-0.5B from <b>44 to 75 tokens/s</b> with unchanged perplexity.</p>
     <div class="ctas">
@@ -211,7 +211,7 @@ footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
     byte than that needs, so memory bandwidth sets the speed limit. A read-only CUDA kernel measured it.</p>
     <div class="formula">max tokens/s = 36.5 GB/s ÷ bytes read per token</div>
     <div class="spec">
-      <div><b>Pascal · sm_61</b><span>2017 architecture</span></div>
+      <div><b>Pascal · sm_61</b><span>2017-era chip design</span></div>
       <div><b>2 SMs</b><span>big GPUs have 80–140</span></div>
       <div><b>2 GB · 64-bit</b><span>GDDR5, 56 GB/s spec</span></div>
       <div><b>No tensor cores</b><span>DP4A is the fast path</span></div>

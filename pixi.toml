@@ -1,0 +1,20 @@
+[workspace]
+name = "mx230-llm-roofline"
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+# CUDA 13 dropped Pascal (sm_61); 12.9 is the last toolkit that builds for the MX230.
+cuda-nvcc = "12.9.*"
+cuda-cudart-dev = "12.9.*"
+libcublas-dev = "12.9.*"
+cuda-version = "12.9.*"
+cmake = ">=3.28"
+ninja = "*"
+gxx_linux-64 = "13.*"
+python = "3.12.*"
+huggingface_hub = "*"
+numpy = ">=2.5.4,<3"
+pyyaml = ">=6.0.3,<7"
+cuda-nvprof = "12.9.*"
+matplotlib = ">=3.11.2,<4"

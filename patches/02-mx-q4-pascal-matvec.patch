@@ -1,0 +1,206 @@
+diff --git a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
+index c6d895d..1154e1e 100644
+--- a/ggml/src/ggml-cuda/mmvq.cu
++++ b/ggml/src/ggml-cuda/mmvq.cu
+@@ -1,4 +1,5 @@
+ #include "mmvq.cuh"
++#include "mx-q4.cuh"
+ #include "quantize.cuh"
+ #include "unary.cuh"
+ #include "vecdotq.cuh"
+@@ -1576,6 +1577,13 @@ void ggml_cuda_mul_mat_vec_q(
+ 
+     const int64_t ids_stride = ids ? ids->nb[1] / ggml_type_size(ids->type) : 0;
+ 
++    // mx230-llm-roofline: experimental Pascal Q4_0 matvec (GGML_CUDA_MX_Q4=smem|repack)
++    if (src0->type == GGML_TYPE_Q4_0 && !ids && !fusion && ncols_dst == 1 && ne02 == 1 && ne03 == 1 &&
++            nchannels_y == 1 && s01 == ne00 / QK4_0 && ggml_cuda_mx_q4_mode() != 0 &&
++            ggml_cuda_mx_q4_mul_mat_vec(src0->data, src1_q8_1.get(), dst_d, ne00, ne01, stream)) {
++        return;
++    }
++
+     mul_mat_vec_q_switch_type(
+         src0->data, src0->type, src1_q8_1.get(), ids_d, fusion_local, dst_d, ne00,
+         ne01,              ncols_dst,     s01, stride_col_y,     stride_col_dst,
+diff --git a/ggml/src/ggml-cuda/mx-q4.cu b/ggml/src/ggml-cuda/mx-q4.cu
+new file mode 100644
+index 0000000..421aa92
+--- /dev/null
++++ b/ggml/src/ggml-cuda/mx-q4.cu
+@@ -0,0 +1,160 @@
++// mx-q4.cu — experimental Q4_0 matvec for small Pascal GPUs (mx230-llm-roofline project).
++// Opt-in with GGML_CUDA_MX_Q4=smem | repack. Only used for plain (unfused, non-MoE) Q4_0 matvecs
++// with one column; everything else stays on llama.cpp's mul_mat_vec_q.
++//   smem   : stock GGUF layout; each warp copies 32 neighbouring blocks with aligned 16-byte loads
++//            into shared memory, 2 rows per warp. No extra memory.
++//   repack : on first use, builds a copy of the weight with the 16 nibble bytes of every block in an
++//            aligned array and the scales in another; one 16-byte load per block, 2 rows per warp.
++//            Costs an extra 16/18 of the Q4_0 weight size in VRAM.
++#include "mx-q4.cuh"
++
++#include <cstdlib>
++#include <cstring>
++#include <mutex>
++#include <unordered_map>
++
++int ggml_cuda_mx_q4_mode() {
++    static const int mode = [] {
++        const char * e = getenv("GGML_CUDA_MX_Q4");
++        if (!e) return 0;
++        if (strcmp(e, "smem") == 0) return 1;
++        if (strcmp(e, "repack") == 0) return 2;
++        return 0;
++    }();
++    return mode;
++}
++
++static __device__ __forceinline__ float mx_warp_sum(float v) {
++#pragma unroll
++    for (int o = 16; o > 0; o >>= 1) v += __shfl_xor_sync(0xffffffff, v, o);
++    return v;
++}
++
++// 32 Q4_0 weights (as 4 ints of nibbles) · 32 q8_1 values, with the -8 offset applied once:
++//   sum((q4 - 8) d4 * q8 d8) = d4 * (d8 * sum(q4 q8) - 8 * s),  s = d8 * sum(q8) (stored in ds.y)
++static __device__ __forceinline__ float mx_block_dot(const int4 w, const block_q8_1 * __restrict__ yb, const float d4) {
++    const int * xi = (const int *) yb->qs;     // 4-byte aligned inside the 36-byte q8_1 block
++    const float2 ds = __half22float2(yb->ds);
++    int s = 0;
++    s = ggml_cuda_dp4a( w.x       & 0x0F0F0F0F, xi[0], s); s = ggml_cuda_dp4a((w.x >> 4) & 0x0F0F0F0F, xi[4], s);
++    s = ggml_cuda_dp4a( w.y       & 0x0F0F0F0F, xi[1], s); s = ggml_cuda_dp4a((w.y >> 4) & 0x0F0F0F0F, xi[5], s);
++    s = ggml_cuda_dp4a( w.z       & 0x0F0F0F0F, xi[2], s); s = ggml_cuda_dp4a((w.z >> 4) & 0x0F0F0F0F, xi[6], s);
++    s = ggml_cuda_dp4a( w.w       & 0x0F0F0F0F, xi[3], s); s = ggml_cuda_dp4a((w.w >> 4) & 0x0F0F0F0F, xi[7], s);
++    return d4 * (ds.x * s - 8.0f * ds.y);
++}
++
++// ---------------------------------------------------------------- smem (stock layout), 2 rows per warp
++static __global__ void mx_q4_smem(const block_q4_0 * __restrict__ W, const block_q8_1 * __restrict__ y,
++                                  float * __restrict__ dst, const int m, const int nb) {
++    constexpr int ROWS = 2;
++    __shared__ int4 sbuf[4][ROWS][38];
++    const int w = threadIdx.x / 32, lane = threadIdx.x & 31;
++    const int r0 = (blockIdx.x * 4 + w) * ROWS;
++    if (r0 >= m) return;
++    float acc[ROWS] = {0.0f, 0.0f};
++    for (int b0 = 0; b0 < nb; b0 += 32) {
++        const int nblk = min(32, nb - b0);
++        int off[ROWS];
++#pragma unroll
++        for (int r = 0; r < ROWS; r++) {
++            off[r] = 0;
++            if (r0 + r >= m) continue;
++            const char * s = (const char *) (W + (size_t) (r0 + r) * nb + b0);
++            const uintptr_t sa = (uintptr_t) s & ~(uintptr_t) 15;
++            const uintptr_t ea = ((uintptr_t) (s + nblk * 18) + 15) & ~(uintptr_t) 15;
++            const int n16 = (int) ((ea - sa) / 16);
++            off[r] = (int) ((uintptr_t) s - sa);
++            for (int t = lane; t < n16; t += 32) sbuf[w][r][t] = __ldg((const int4 *) sa + t);
++        }
++        __syncwarp();
++        if (lane < nblk) {
++            const block_q8_1 * yb = y + b0 + lane;
++#pragma unroll
++            for (int r = 0; r < ROWS; r++) {
++                if (r0 + r >= m) continue;
++                const char * bp = (const char *) sbuf[w][r] + off[r] + lane * 18;
++                const uint16_t * q16 = (const uint16_t *) (bp + 2);
++                int4 wv;
++                wv.x = q16[0] | (q16[1] << 16); wv.y = q16[2] | (q16[3] << 16);
++                wv.z = q16[4] | (q16[5] << 16); wv.w = q16[6] | (q16[7] << 16);
++                acc[r] += mx_block_dot(wv, yb, __half2float(*(const half *) bp));
++            }
++        }
++        __syncwarp();
++    }
++#pragma unroll
++    for (int r = 0; r < ROWS; r++) {
++        const float a = mx_warp_sum(acc[r]);
++        if (lane == 0 && r0 + r < m) dst[r0 + r] = a;
++    }
++}
++
++// ---------------------------------------------------------------- repack
++static __global__ void mx_q4_repack_kernel(const block_q4_0 * __restrict__ W, int4 * __restrict__ wq,
++                                           half * __restrict__ wd, const size_t nblk) {
++    const size_t i = (size_t) blockIdx.x * blockDim.x + threadIdx.x;
++    if (i >= nblk) return;
++    const uint16_t * q16 = (const uint16_t *) W[i].qs;
++    int4 v;
++    v.x = q16[0] | (q16[1] << 16); v.y = q16[2] | (q16[3] << 16);
++    v.z = q16[4] | (q16[5] << 16); v.w = q16[6] | (q16[7] << 16);
++    wq[i] = v;
++    wd[i] = W[i].d;
++}
++
++static __global__ void mx_q4_repacked(const int4 * __restrict__ Wq, const half * __restrict__ Wd,
++                                      const block_q8_1 * __restrict__ y, float * __restrict__ dst,
++                                      const int m, const int nb) {
++    const int warp = (blockIdx.x * blockDim.x + threadIdx.x) / 32, lane = threadIdx.x & 31;
++    const int r0 = warp * 2;
++    if (r0 >= m) return;
++    const bool has1 = r0 + 1 < m;
++    const int4 * w0 = Wq + (size_t) r0 * nb;  const half * d0 = Wd + (size_t) r0 * nb;
++    const int4 * w1 = w0 + nb;                const half * d1 = d0 + nb;
++    float a0 = 0.0f, a1 = 0.0f;
++    for (int b = lane; b < nb; b += 32) {
++        const int4 q0 = __ldg(w0 + b);
++        const int4 q1 = has1 ? __ldg(w1 + b) : make_int4(0, 0, 0, 0);
++        a0 += mx_block_dot(q0, y + b, __half2float(d0[b]));
++        if (has1) a1 += mx_block_dot(q1, y + b, __half2float(d1[b]));
++    }
++    a0 = mx_warp_sum(a0); a1 = mx_warp_sum(a1);
++    if (lane == 0) { dst[r0] = a0; if (has1) dst[r0 + 1] = a1; }
++}
++
++struct mx_repacked { int4 * wq; half * wd; };
++
++bool ggml_cuda_mx_q4_mul_mat_vec(const void * src0_d, const void * src1_q8_1, float * dst_d,
++                                 int64_t ncols, int64_t nrows, cudaStream_t stream) {
++    const int mode = ggml_cuda_mx_q4_mode();
++    if (mode == 0 || ncols % QK4_0 != 0) return false;
++    const int nb = (int) (ncols / QK4_0);
++    const int m  = (int) nrows;
++    const block_q8_1 * y = (const block_q8_1 *) src1_q8_1;
++
++    if (mode == 1) {
++        const int rows_per_block = 4 * 2;
++        mx_q4_smem<<<(m + rows_per_block - 1) / rows_per_block, 128, 0, stream>>>((const block_q4_0 *) src0_d, y, dst_d, m, nb);
++        return true;
++    }
++
++    static std::mutex mtx;
++    static std::unordered_map<const void *, mx_repacked> cache;
++    mx_repacked rp;
++    {
++        std::lock_guard<std::mutex> lock(mtx);
++        auto it = cache.find(src0_d);
++        if (it == cache.end()) {
++            const size_t nblk = (size_t) m * nb;
++            if (cudaMalloc(&rp.wq, nblk * sizeof(int4)) != cudaSuccess) { (void) cudaGetLastError(); return false; }
++            if (cudaMalloc(&rp.wd, nblk * sizeof(half)) != cudaSuccess) { (void) cudaGetLastError(); cudaFree(rp.wq); return false; }
++            mx_q4_repack_kernel<<<(unsigned) ((nblk + 255) / 256), 256, 0, stream>>>((const block_q4_0 *) src0_d, rp.wq, rp.wd, nblk);
++            cache[src0_d] = rp;
++        } else {
++            rp = it->second;
++        }
++    }
++    const int rows_per_block = 4 * 2;
++    mx_q4_repacked<<<(m + rows_per_block - 1) / rows_per_block, 128, 0, stream>>>(rp.wq, rp.wd, y, dst_d, m, nb);
++    return true;
++}
+diff --git a/ggml/src/ggml-cuda/mx-q4.cuh b/ggml/src/ggml-cuda/mx-q4.cuh
+new file mode 100644
+index 0000000..8f5e249
+--- /dev/null
++++ b/ggml/src/ggml-cuda/mx-q4.cuh
+@@ -0,0 +1,10 @@
++#pragma once
++#include "common.cuh"
++
++// 0 = off, 1 = smem (stock layout), 2 = repack; from GGML_CUDA_MX_Q4
++int ggml_cuda_mx_q4_mode();
++
++// y = W x for one column. W: Q4_0 [nrows, ncols], contiguous rows. x: already quantized to q8_1.
++// Returns false if it did not run (caller then uses mul_mat_vec_q).
++bool ggml_cuda_mx_q4_mul_mat_vec(const void * src0_d, const void * src1_q8_1, float * dst_d,
++                                 int64_t ncols, int64_t nrows, cudaStream_t stream);

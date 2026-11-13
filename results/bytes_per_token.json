@@ -1,0 +1,42 @@
+{
+ "qwen2.5-0.5b-instruct-fp16": {
+  "bytes_per_token": 988210432,
+  "file_bytes": 1266425696,
+  "tied": false
+ },
+ "qwen2.5-0.5b-instruct-q4_0": {
+  "bytes_per_token": 346207224,
+  "file_bytes": 428730208,
+  "tied": false
+ },
+ "qwen2.5-0.5b-instruct-q4_k_m": {
+  "bytes_per_token": 391860328,
+  "file_bytes": 491400032,
+  "tied": false
+ },
+ "qwen2.5-0.5b-instruct-q8_0": {
+  "bytes_per_token": 525120952,
+  "file_bytes": 675710816,
+  "tied": false
+ },
+ "qwen2.5-1.5b-instruct-q4_0": {
+  "bytes_per_token": 929004896,
+  "file_bytes": 1066227232,
+  "tied": false
+ },
+ "qwen2.5-1.5b-instruct-q4_k_m": {
+  "bytes_per_token": 980098400,
+  "file_bytes": 1117320736,
+  "tied": false
+ },
+ "qwen2.5-1.5b-instruct-q8_0": {
+  "bytes_per_token": 1640623712,
+  "file_bytes": 1894532128,
+  "tied": false
+ },
+ "qwen2.5-3b-instruct-q4_0": {
+  "bytes_per_token": 1816894592,
+  "file_bytes": 1997879712,
+  "tied": false
+ }
+}

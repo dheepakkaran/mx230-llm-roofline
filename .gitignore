@@ -1,0 +1,10 @@
+.pixi/
+third_party/
+models/
+results/raw/
+build/
+BUILD-LOG.md
+__pycache__/
+data/
+NOTES.md
+upstream/

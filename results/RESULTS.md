@@ -279,3 +279,25 @@ Perplexity, wikitext-2 test, 8 chunks × 256 tokens, **ubatch 1** (forces the ma
   identical for 6 words, then picks a different near-tied word ("Earth's" vs "sun's") and continues
   with a different, equally fluent answer. Bit-exact output is not expected when the summation order
   changes.
+
+## Step 7: root cause of the fusion slowdown, and a one-line fix (2026-11-13)
+
+llama.cpp already turns mmvq fusion off for Pascal in `ggml_cuda_should_fuse_mul_mat_vec_q`
+("fusion is not universally faster on Pascal"), but the guard is `cc <= GGML_CUDA_CC_PASCAL`, and
+`GGML_CUDA_CC_PASCAL` is 600 (GP100 / Tesla P100). Consumer Pascal (GTX 10-series, MX150/230/250) is
+compute capability **6.1 (610)**, so the guard never fires on them. Fix (`patches/03-fix-pascal-fusion-guard.patch`):
+`cc < GGML_CUDA_CC_VOLTA`. Still present in upstream master on 2026-11-13; no open PR.
+
+Same session, clean upstream b79696f with and without the one-line change (pp512 + tg128, 3 reps, FA on):
+
+| model | upstream tg128 | **fixed tg128** | change | fixed + `GGML_CUDA_DISABLE_FUSION=1` | pp512 upstream → fixed |
+|---|---|---|---|---|---|
+| 0.5B Q4_0 | 47.7 | **67.8** | **+42%** | 67.3 | 1099 → 1108 |
+| 0.5B Q8_0 | 46.8 | **60.2** | +29% | 59.6 | 1069 → 1071 |
+| 0.5B Q4_K_M | 42.6 | **59.7** | **+40%** | 58.5 | 1038 → 1039 |
+| 1.5B Q4_0 | 21.5 | **30.5** | **+42%** | 30.2 | 383 → 383 |
+
+- The fix is slightly faster than disabling all fusion, because the other fusions (norms, adds) stay on.
+- Absolute speeds in this session are ~8% higher than in Steps 2–6 (laptop power state); compare
+  within a table, not across tables.
+- `test-backend-ops test -b CUDA0 -o MUL_MAT_FUSION`: **1601/1601 passed** with the fix.

@@ -9,6 +9,10 @@ and then writes its own CUDA kernels.
 
 Project page: https://dheepakkaran.github.io/mx230-llm-roofline/
 
+> **Found along the way:** llama.cpp's CUDA kernel fusion makes token generation 20–36% *slower* on this
+> Pascal GPU, with identical output when it is switched off. Reported upstream as
+> [ggml-org/llama.cpp#32229](https://github.com/ggml-org/llama.cpp/issues/32229).
+
 ![decode speed at each step](docs/fig_speed.png)
 
 ## Results

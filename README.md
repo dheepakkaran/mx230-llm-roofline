@@ -9,6 +9,10 @@ and then writes its own CUDA kernels.
 
 Project page: https://dheepakkaran.github.io/mx230-llm-roofline/
 
+<a href="https://dheepakkaran.github.io/mx230-llm-roofline/#overview"><img src="docs/media/overview.webp" alt="35-second overview: a 2017 laptop chip new AI tools dropped; its measured speed limit, 8 speed tricks, a llama.cpp slowdown found and reported as issue #32229, own GPU code at 94% of the limit, and the result: 1.70x faster with unchanged answer quality" width="100%"></a>
+
+<sub>35-second overview (silent preview). <a href="https://dheepakkaran.github.io/mx230-llm-roofline/#overview">Watch it with sound on the project page →</a></sub>
+
 > **Found along the way:** llama.cpp's CUDA kernel fusion makes token generation 20–36% *slower* on this
 > Pascal GPU, with identical output when it is switched off. Reported upstream as
 > [ggml-org/llama.cpp#32229](https://github.com/ggml-org/llama.cpp/issues/32229).

@@ -301,3 +301,8 @@ Same session, clean upstream b79696f with and without the one-line change (pp512
 - Absolute speeds in this session are ~8% higher than in Steps 2–6 (laptop power state); compare
   within a table, not across tables.
 - `test-backend-ops test -b CUDA0 -o MUL_MAT_FUSION`: **1601/1601 passed** with the fix.
+
+Re-verified on latest upstream master ded522f (the PR branch) with `scripts/pr_verify.sh`, same session:
+0.5B Q4_0 43.9 → **60.7** (+38%), 0.5B Q8_0 41.6 → 50.1 (+20%), 0.5B Q4_K_M 39.8 → 53.5 (+34%),
+1.5B Q4_0 19.8 → 26.1 (+32%); pp512 within ±1%; greedy output with the fix **identical** to upstream
+(1.5B, code + prose, 128 tokens); `MUL_MAT_FUSION` 1601/1601 passed.

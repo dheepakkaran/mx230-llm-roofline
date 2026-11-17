@@ -16,6 +16,9 @@ Project page: https://dheepakkaran.github.io/mx230-llm-roofline/
 > **Found along the way:** llama.cpp's CUDA kernel fusion makes token generation 20–36% *slower* on this
 > Pascal GPU, with identical output when it is switched off. Reported upstream as
 > [ggml-org/llama.cpp#32229](https://github.com/ggml-org/llama.cpp/issues/32229).
+> Root cause (a version check that missed cc 6.1) fixed in a one-line PR,
+> **merged 2026-11-17**: [ggml-org/llama.cpp#32239](https://github.com/ggml-org/llama.cpp/pull/32239)
+> ([113-second story film](https://dheepakkaran.github.io/mx230-llm-roofline/#upstream-film)).
 
 ![decode speed at each step](docs/fig_speed.png)
 
@@ -41,7 +44,7 @@ Project page: https://dheepakkaran.github.io/mx230-llm-roofline/
 3. **Profiling with nvprof** (Nsight Compute does not support Pascal). Forcing CUDA graphs on changed
    nothing (launch overhead is not the problem). The **fused FFN gate+up matvec** took half of each
    token at 28% of bandwidth; with fusion off decode is **20–36% faster with identical output**.
-   Reported upstream: [ggml-org/llama.cpp#32229](https://github.com/ggml-org/llama.cpp/issues/32229).
+   Reported upstream: [ggml-org/llama.cpp#32229](https://github.com/ggml-org/llama.cpp/issues/32229); fixed by [#32239](https://github.com/ggml-org/llama.cpp/pull/32239), merged 2026-11-17.
 4. **Own Q4_0 matvec kernels** (`kernels/q4mv.cu`, seven versions, each checked against a CPU
    reference). DP4A integer math plus a **repacked, 16-byte-aligned weight layout** reaches **84–94% of
    the ceiling** on large matrices, 1.3–1.6× faster per call than llama.cpp. Same math on the stock

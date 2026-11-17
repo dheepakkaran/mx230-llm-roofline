@@ -159,7 +159,7 @@ footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
       <a href="#overview">Video</a>
       <a href="#ceiling">Ceiling</a>
       <a href="#tricks">8 tricks</a>
-      <a href="#upstream">Upstream issue</a>
+      <a href="#upstream">Upstream fix</a>
       <a href="#kernels">Kernels</a>
       <a href="#result">Result</a>
       <a href="#limits">Limits</a>
@@ -247,7 +247,7 @@ footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
 
 <section id="upstream">
   <div class="wrap">
-    <div class="sh"><div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 5 5"/></svg></div><div class="n">03 · found while profiling · reported upstream</div></div>
+    <div class="sh"><div class="ico"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 5 5"/></svg></div><div class="n">03 · found while profiling · fixed upstream · merged</div></div>
     <h2>An optimization built for big GPUs was slowing this one down.</h2>
     <p class="sub">CUDA graphs (off for pre-Volta GPUs in llama.cpp) were forced on and proven to run: speed did
     not move, so launch overhead was not the problem. <code>nvprof</code> then showed one kernel, the
@@ -276,6 +276,30 @@ footer .wrap{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
         </div>
       </div>
     </div>
+    <div class="callout">
+      <div class="head">
+        <a class="issue" href="https://github.com/ggml-org/llama.cpp/pull/32239"><span class="dot" aria-hidden="true" style="border-color:#8250df"></span>ggml-org/llama.cpp PR #32239 <span>· merged 2026-11-17 · 10152bc4a0</span></a>
+        <code>cc &lt;= GGML_CUDA_CC_PASCAL → cc &lt; GGML_CUDA_CC_VOLTA</code>
+      </div>
+      <div class="body">
+        <div class="col">
+          <p><b>Root cause: a one-line check.</b> llama.cpp already meant to turn this fusion off on Pascal, but the
+          check <code>cc &lt;= 600</code> only matched the Tesla P100. Every GTX 10-series, MX and Tesla P40 card
+          (cc 6.1) still got the slow fused kernel. The fix is one line: +20–38% decode on the MX230, 1601/1601 fusion tests pass.</p>
+        </div>
+        <div class="col">
+          <p><b>Proved on a bigger GPU.</b> A reviewer asked if a 2-SM laptop chip was representative. The P40 owner from
+          the earlier report <a href="https://github.com/ggml-org/llama.cpp/issues/30334">#30334</a> ran the patch: 3 of 4 models faster (up to +11.9%).
+          Approved by am17an and JohannesGaessler, who confirmed the check was meant to cover all of Pascal.</p>
+        </div>
+      </div>
+    </div>
+    <figure class="overview" id="upstream-film" style="margin-top:28px">
+      <video controls playsinline preload="metadata" poster="media/upstream.jpg" aria-label="113-second film: from a laptop profile to a merged llama.cpp PR">
+        <source src="media/upstream.mp4" type="video/mp4">
+      </video>
+      <figcaption>The story of the fix in 113 seconds, sound on: the finding, the one-line root cause, the review that stalled, the evidence hunt, the P40 benchmark and the merge. Quotes are word for word from the <a href="https://github.com/ggml-org/llama.cpp/pull/32239">PR thread</a>.</figcaption>
+    </figure>
   </div>
 </section>
 

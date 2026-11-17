@@ -11,6 +11,7 @@ Steps (scratch files go to film/_work/, which is gitignored):
   python3 film/make_film.py mux                    # ffmpeg -> docs/media/keynote.mp4
   python3 film/make_film.py previews               # keynote.jpg poster + keynote.webp silent preview
   ... make_film.py stills 3 20 45 80 115           # PNG stills into film/_work/stills/
+  FILM=upstream ... = the llama.cpp PR story film (film/upstream.html -> docs/media/upstream.*, scratch in film/_work/upstream/)
 """
 import json
 import os
@@ -22,10 +23,11 @@ from concurrent.futures import ProcessPoolExecutor
 
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
-WORK = HERE / "_work"
+FILM = os.environ.get("FILM", "keynote")  # keynote | upstream (film/<FILM>.html -> docs/media/<FILM>.*)
+WORK = HERE / "_work" if FILM == "keynote" else HERE / "_work" / FILM
 CHUNKS = WORK / "chunks"
 MEDIA = ROOT / "docs" / "media"
-PAGE = (HERE / "keynote.html").as_uri() + "?manual=1"
+PAGE = (HERE / f"{FILM}.html").as_uri() + "?manual=1"
 FPS, SR, CHUNK, WORKERS = 30, 44100, 120, 6
 BEAT = 60 / 90
 
@@ -201,7 +203,7 @@ def score():
 
 def mux():
     MEDIA.mkdir(parents=True, exist_ok=True)
-    out = MEDIA / "keynote.mp4"
+    out = MEDIA / f"{FILM}.mp4"
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(WORK / "chunks.txt"),
                     "-i", str(WORK / "score.wav"), "-c:v", "libx264", "-preset", "slow", "-crf", os.environ.get("CRF", "23"),
                     "-tune", "stillimage", "-pix_fmt", "yuv420p", "-r", str(FPS), "-c:a", "aac", "-b:a", "160k",
@@ -210,14 +212,14 @@ def mux():
 
 
 def previews(poster_t="57.6"):
-    src = MEDIA / "keynote.mp4"
+    src = MEDIA / f"{FILM}.mp4"
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", poster_t, "-i", str(src), "-frames:v", "1",
-                    "-vf", "scale=1280:720:flags=lanczos", "-q:v", "3", str(MEDIA / "keynote.jpg")], check=True)
+                    "-vf", "scale=1280:720:flags=lanczos", "-q:v", "3", str(MEDIA / f"{FILM}.jpg")], check=True)
     # silent preview at 4x speed, 960 px wide, 8 fps
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-an",
                     "-vf", "setpts=PTS/4,fps=8,scale=960:540:flags=lanczos", "-c:v", "libwebp_anim", "-q:v", "60",
-                    "-compression_level", "6", "-loop", "0", str(MEDIA / "keynote.webp")], check=True)
-    for f in ("keynote.jpg", "keynote.webp"):
+                    "-compression_level", "6", "-loop", "0", str(MEDIA / f"{FILM}.webp")], check=True)
+    for f in (f"{FILM}.jpg", f"{FILM}.webp"):
         print(f, round((MEDIA / f).stat().st_size / 1e6, 2), "MB")
 
 

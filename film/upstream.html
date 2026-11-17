@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>llama.cpp PR story</title>
+<!--
+  Upstream story film: how the Pascal fusion-guard bug went from a laptop profile to a merged llama.cpp PR.
+  Same engine as keynote.html: renderAt(t) is deterministic, film/make_film.py screenshots it
+  (FILM=upstream). Open without "?manual=1" to watch it play (silent).
+  Facts: upstream/PR-NOTES.md, upstream/issue-32229-thread.md, PR #32239 and issue #30334 threads.
+-->
+<style>
+@font-face{font-family:"Inter";src:url("fonts/InterVariable.woff2") format("woff2");font-weight:100 900;font-display:block}
+:root{--g1:#76b900;--g2:#13c6b3;--grey:#86868b;--dim:#48484c;--ink:#f5f5f7;--red:#ff6b5e;--purple:#8250df}
+*{box-sizing:border-box}
+html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:#000;color:var(--ink);
+  font-family:"Inter",system-ui,sans-serif;-webkit-font-smoothing:antialiased;font-feature-settings:"ss01","cv11"}
+.mono{font-family:"DejaVu Sans Mono","Noto Sans Mono",ui-monospace,monospace}
+.scene{position:absolute;left:0;top:0;width:1920px;height:1080px;opacity:0;visibility:hidden}
+.center{display:flex;flex-direction:column;align-items:center;justify-content:center}
+.h{font-size:116px;font-weight:700;letter-spacing:-0.045em;line-height:1.06;text-align:center;margin:0}
+.h2{font-size:84px;font-weight:700;letter-spacing:-0.042em;line-height:1.08;margin:0}
+.g{background:linear-gradient(90deg,var(--g1) 10%,var(--g2) 90%);-webkit-background-clip:text;background-clip:text;color:transparent}
+.s{font-size:36px;font-weight:500;color:var(--grey);letter-spacing:-0.012em;line-height:1.35;text-align:center}
+.k{font-size:28px;font-weight:600;color:var(--grey);letter-spacing:.04em}
+.abs{position:absolute}
+.wide{left:0;width:1920px}
+[data-in]{opacity:0}
+.date{position:absolute;left:120px;top:90px;font-size:24px;font-weight:700;letter-spacing:.12em;color:#6e6e73}
+.date b{color:var(--g1);font-weight:700}
+
+/* bars */
+.bl{position:absolute;left:300px;width:1320px}
+.bl .lab{font-size:30px;font-weight:600;color:#d2d2d7;margin-bottom:14px;display:flex;justify-content:space-between}
+.bl .lab span{color:var(--grey);font-weight:500}
+.track{position:relative;height:60px;border-radius:14px;background:#151517;overflow:hidden}
+.fill{position:absolute;left:0;top:0;bottom:0;width:0;border-radius:14px}
+.gfill{background:linear-gradient(90deg,var(--g1),var(--g2))}
+.greyfill{background:#3a3a3e}
+
+/* code */
+.code{position:absolute;border-radius:18px;background:#0d0d0f;border:1px solid #232327;padding:34px 44px;font-size:34px;line-height:1.7;color:#d2d2d7}
+.code .c{color:#6e6e73}
+.code .kw{color:#c792ea}
+.code .num{color:#f78c6c}
+.dl{display:block;padding:0 14px;margin:0 -14px;border-radius:8px}
+.dl.minus{background:rgba(255,107,94,.13);color:#ffb3ab}
+.dl.plus{background:rgba(118,185,0,.16);color:#c6f07a}
+
+/* cc table */
+.ccrow{position:absolute;left:300px;width:1320px;height:96px;display:flex;align-items:center;border-top:1px solid #1d1d20}
+.ccrow .cc{width:150px;font-size:44px;font-weight:700;letter-spacing:-0.02em}
+.ccrow .chips{flex:1;font-size:30px;color:#a1a1a6}
+.tag{font-size:22px;font-weight:700;padding:9px 20px;border-radius:999px;white-space:nowrap}
+.tag.ok{color:#000;background:linear-gradient(90deg,var(--g1),#9bd22e)}
+.tag.bad{color:#ff8a80;background:#2a1513}
+.tag.grey{color:#d2d2d7;background:#2a2a2d}
+.tag.purple{color:#fff;background:var(--purple)}
+
+/* review rows */
+.rv{position:absolute;left:260px;width:1400px;display:flex;align-items:flex-start;gap:30px}
+.av{flex:none;width:72px;height:72px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:700;color:#000}
+.rv .who{font-size:28px;font-weight:700;color:#f5f5f7}
+.rv .who span{font-weight:500;color:var(--grey);font-size:24px;margin-left:12px}
+.rv .say{font-size:34px;color:#c7c7cc;line-height:1.38;margin-top:8px;letter-spacing:-0.01em}
+.strike{position:relative;display:inline-block}
+.strike b{position:absolute;left:-6px;right:-6px;top:50%;height:4px;border-radius:2px;background:var(--red);transform-origin:0 50%;transform:scaleX(0)}
+
+/* evidence cards */
+.ev{position:absolute;top:400px;width:470px;height:440px;border-radius:22px;background:#0e0e10;border:1px solid #26262a;padding:38px 38px}
+.ev .n{font-size:22px;font-weight:700;letter-spacing:.12em;color:var(--g1)}
+.ev .t{font-size:40px;font-weight:700;letter-spacing:-0.025em;margin-top:14px;line-height:1.12}
+.ev .d{font-size:27px;color:#a1a1a6;line-height:1.42;margin-top:18px}
+.ev .q{color:#e8e8ed;font-style:italic}
+
+/* diverging bars */
+.dv{position:absolute;left:200px;width:1520px;height:92px;display:flex;align-items:center}
+.dv .m{width:520px;font-size:30px;font-weight:600;color:#d2d2d7}
+.dv .m span{display:block;font-size:22px;color:var(--grey);font-weight:500;margin-top:4px}
+.dv .ax{position:relative;flex:1;height:52px}
+.dv .zero{position:absolute;left:120px;top:-12px;bottom:-12px;border-left:2px solid #3a3a3e}
+.dv .bar{position:absolute;top:0;height:52px;border-radius:10px}
+.dv .v{position:absolute;top:8px;font-size:30px;font-weight:700}
+
+/* github card */
+.card{position:absolute;left:310px;top:300px;width:1300px;border-radius:18px;background:#fff;color:#1f2328;overflow:hidden}
+.card .top{height:70px;background:#f6f8fa;border-bottom:1px solid #d1d9e0;display:flex;align-items:center;gap:16px;padding:0 34px;font-size:24px;color:#59636e}
+.card .top b{color:#1f2328}
+.card .body{padding:34px 44px 40px;font-size:34px;line-height:1.5}
+.card .body .qt{border-left:5px solid #d1d9e0;padding-left:22px;color:#59636e;font-size:28px;margin-bottom:22px}
+.card code{font-family:"DejaVu Sans Mono",monospace;background:#eff1f3;border-radius:6px;padding:2px 8px;font-size:30px}
+.hl{background-image:linear-gradient(#ffe866,#ffe866);background-repeat:no-repeat;background-size:0% 100%;border-radius:4px}
+
+/* merged */
+.merged{display:inline-flex;align-items:center;gap:26px;background:var(--purple);color:#fff;font-size:92px;font-weight:700;letter-spacing:-0.03em;border-radius:999px;padding:30px 70px 30px 52px}
+.merged svg{width:92px;height:92px}
+</style>
+</head>
+<body>
+
+<!-- 1. Title -->
+<section class="scene center" id="s1">
+  <div class="k" data-in="0.4" style="margin-bottom:26px">GGML-ORG / LLAMA.CPP · PULL REQUEST #32239</div>
+  <h1 class="h" data-in="1.0" style="font-size:150px">One line.</h1>
+  <h1 class="h g" data-in="2.0" style="font-size:150px">Merged.</h1>
+  <div class="s" data-in="3.4" style="margin-top:34px">How a laptop GPU found a bug in one of the most used local LLM engines.</div>
+</section>
+
+<!-- 2. The setup -->
+<section class="scene" id="s2">
+  <div class="date" data-in="0.2"><b>NOV 13</b> · 2026</div>
+  <div class="abs center wide" style="top:300px">
+    <h2 class="h2" data-in="0.4" style="text-align:center">We were trying to make LLMs run fast</h2>
+    <h2 class="h2" data-in="1.4" style="text-align:center">on a <span class="g">2017-era laptop GPU.</span></h2>
+  </div>
+  <div class="abs wide" style="top:640px;display:flex;justify-content:center;gap:90px">
+    <div data-in="3.0" style="text-align:center"><div style="font-size:84px;font-weight:700;letter-spacing:-0.03em">MX230</div><div class="s" style="font-size:28px">NVIDIA Pascal</div></div>
+    <div data-in="3.5" style="text-align:center"><div style="font-size:84px;font-weight:700;letter-spacing:-0.03em">2 SMs</div><div class="s" style="font-size:28px">worker blocks</div></div>
+    <div data-in="4.0" style="text-align:center"><div style="font-size:84px;font-weight:700;letter-spacing:-0.03em">2 GB</div><div class="s" style="font-size:28px">memory</div></div>
+  </div>
+  <div class="abs s wide" data-in="5.4" style="top:880px">Running Qwen2.5 with llama.cpp. And profiling every kernel.</div>
+</section>
+
+<!-- 3. The discovery -->
+<section class="scene" id="s3">
+  <div class="date"><b>NOV 13</b> · 2026</div>
+  <div class="abs center wide" style="top:150px">
+    <h2 class="h2" data-in="0.3">Then something strange.</h2>
+    <div class="mono" data-in="1.4" style="margin-top:34px;font-size:36px;color:#c6f07a;background:#0d0d0f;border:1px solid #232327;border-radius:14px;padding:16px 30px">GGML_CUDA_DISABLE_FUSION=1</div>
+    <div class="s" data-in="2.0" style="margin-top:18px;font-size:30px">Turn an optimisation <em>off</em>, and it gets faster?</div>
+  </div>
+  <div class="bl" style="top:560px" data-in="3.0">
+    <div class="lab">Fusion on · the default <span id="v3a">0.0 tok/s</span></div>
+    <div class="track"><div class="fill greyfill" id="b3a"></div></div>
+  </div>
+  <div class="bl" style="top:720px" data-in="3.6">
+    <div class="lab">Fusion off <span id="v3b">0.0 tok/s</span></div>
+    <div class="track"><div class="fill gfill" id="b3b"></div></div>
+  </div>
+  <div class="abs wide center" style="top:900px">
+    <div data-in="7.0" style="font-size:52px;font-weight:700;letter-spacing:-0.03em"><span class="g">+38% faster.</span> Same output, byte for byte.</div>
+  </div>
+  <div class="abs s" data-in="7.6" style="right:120px;top:990px;font-size:22px;text-align:right">Qwen2.5 0.5B Q4_0, tokens per second</div>
+</section>
+
+<!-- 4. Root cause -->
+<section class="scene" id="s4">
+  <div class="date"><b>NOV 13</b> · ROOT CAUSE</div>
+  <div class="code mono" data-in="0.4" style="left:300px;top:150px;width:1320px">
+    <span class="c">// fusion is not universally faster on Pascal</span><br>
+    <span class="kw">if</span> (cc &lt;= GGML_CUDA_CC_PASCAL) <span class="kw">return</span> false;<br>
+    <span data-in="1.8"><span class="c">// and GGML_CUDA_CC_PASCAL is</span> <span class="num">600</span></span>
+  </div>
+  <div class="ccrow" style="top:520px" data-in="3.0"><div class="cc">600</div><div class="chips">Tesla P100</div><span class="tag ok">fusion off ✓</span></div>
+  <div class="ccrow" style="top:616px" data-in="3.6"><div class="cc" style="color:var(--red)">610</div><div class="chips">GTX 1050 – 1080 Ti · MX150 / 230 / 250 · Tesla P40</div><span class="tag bad">fusion on · slow</span></div>
+  <div class="ccrow" style="top:712px;border-bottom:1px solid #1d1d20" data-in="4.2"><div class="cc" style="color:var(--red)">620</div><div class="chips">Jetson TX2</div><span class="tag bad">fusion on · slow</span></div>
+  <div class="abs wide center" style="top:880px">
+    <div data-in="5.6" style="font-size:54px;font-weight:700;letter-spacing:-0.03em">The check meant <span class="g">all of Pascal.</span> It caught one chip.</div>
+  </div>
+</section>
+
+<!-- 5. The fix -->
+<section class="scene" id="s5">
+  <div class="date"><b>NOV 13</b> · ISSUE #32229 + PR #32239</div>
+  <div class="abs center wide" style="top:150px"><h2 class="h2" data-in="0.3">The fix is one line.</h2></div>
+  <div class="code mono" data-in="1.2" style="left:300px;top:330px;width:1320px;font-size:38px">
+    <span class="dl minus">-  if (cc &lt;= GGML_CUDA_CC_PASCAL) {</span>
+    <span class="dl plus" data-in="2.2">+  if (cc &lt; GGML_CUDA_CC_VOLTA) {</span>
+  </div>
+  <div class="abs wide" style="top:640px;display:flex;justify-content:center;gap:120px">
+    <div data-in="3.6" style="text-align:center"><div class="g" style="font-size:96px;font-weight:700;letter-spacing:-0.04em">1 line</div><div class="s" style="font-size:28px">changed</div></div>
+    <div data-in="4.1" style="text-align:center"><div class="g" style="font-size:96px;font-weight:700;letter-spacing:-0.04em">+20–38%</div><div class="s" style="font-size:28px">decode speed on the MX230</div></div>
+    <div data-in="4.6" style="text-align:center"><div class="g" style="font-size:96px;font-weight:700;letter-spacing:-0.04em">1601/1601</div><div class="s" style="font-size:28px">fusion tests pass</div></div>
+  </div>
+</section>
+
+<!-- 6. Approved, then stalled -->
+<section class="scene" id="s6">
+  <div class="date"><b>NOV 14</b> · REVIEW</div>
+  <div class="rv" style="top:180px" data-in="0.4">
+    <div class="av" style="background:#9bd22e">a</div>
+    <div><div class="who">am17an <span>CUDA code owner</span></div>
+      <div class="say"><span class="tag ok">Approved ✓</span>&nbsp;&nbsp;<span class="strike"><span class="tag grey">merge ready</span><b id="st6"></b></span></div></div>
+  </div>
+  <div class="rv" style="top:360px" data-in="2.2">
+    <div class="av" style="background:#d2d2d7">0</div>
+    <div><div class="who">0cc4m <span>maintainer</span></div>
+      <div class="say">“Not sure the MX230 (with just 2 SMs, jeez) is representative.”</div></div>
+  </div>
+  <div class="rv" style="top:560px" data-in="4.4">
+    <div class="av" style="background:#9bd22e">a</div>
+    <div><div class="who">am17an</div>
+      <div class="say">“P40s were already excluded.”</div></div>
+  </div>
+  <div class="rv" style="top:720px" data-in="6.0">
+    <div class="av" style="background:linear-gradient(135deg,var(--g1),var(--g2))">D</div>
+    <div><div class="who">dheepakkaran <span>us</span></div>
+      <div class="say">They weren't. The P40 is cc 6.1. The old check never covered it.</div></div>
+  </div>
+  <div class="abs wide center" style="top:925px">
+    <div data-in="8.4" style="font-size:50px;font-weight:700;letter-spacing:-0.03em">Right point. But <span style="color:var(--red)">“merge ready” came off.</span> It stalled.</div>
+  </div>
+</section>
+
+<!-- 7. Evidence hunt -->
+<section class="scene" id="s7">
+  <div class="date"><b>NOV 14</b> · EVIDENCE</div>
+  <div class="abs center wide" style="top:170px">
+    <h2 class="h2" data-in="0.3">So we went looking for <span class="g">proof.</span></h2>
+    <div class="s" data-in="1.2" style="margin-top:20px">One laptop isn't enough. We needed a big Pascal card.</div>
+  </div>
+  <div class="ev" style="left:180px" data-in="2.6">
+    <div class="n">01 · PR #16715 · OCT 2025</div>
+    <div class="t">Where the check came from.</div>
+    <div class="d">A maintainer had benchmarked a P40 and wrote: <span class="q">“enabling fusion of that kernel only for Volta and newer.”</span> The code didn't do that.</div>
+  </div>
+  <div class="ev" style="left:725px" data-in="4.4">
+    <div class="n">02 · ISSUE #30334 · OCT 2026</div>
+    <div class="t">Someone hit it before us.</div>
+    <div class="d">A Tesla P40 owner reported the same check a month earlier. <span style="color:#e8e8ed">0 replies.</span> We credited it in the PR.</div>
+  </div>
+  <div class="ev" style="left:1270px" data-in="6.2">
+    <div class="n">03 · THE ASK</div>
+    <div class="t">Test our one line on your P40?</div>
+    <div class="d">We asked that same P40 owner to build master and our patch on the same commit, and run both.</div>
+  </div>
+</section>
+
+<!-- 8. P40 results -->
+<section class="scene" id="s8">
+  <div class="date"><b>NOV 15</b> · TESLA P40</div>
+  <div class="abs center wide" style="top:130px">
+    <h2 class="h2" data-in="0.3">They ran it. On a <span class="g">30-SM</span> data-centre card.</h2>
+    <div class="s" data-in="1.0" style="margin-top:18px;font-size:30px">Our patch vs master, token generation, median of 6 runs · by ymr-gif</div>
+  </div>
+  <div class="dv" style="top:400px" data-in="2.0"><div class="m">Mixtral 8x7B<span>Q3_K_M</span></div><div class="ax"><div class="zero"></div><div class="bar" data-v="11.85"></div><div class="v" data-v="11.85">+11.9%</div></div></div>
+  <div class="dv" style="top:510px" data-in="2.5"><div class="m">Llama 3.1 8B<span>Q4_0</span></div><div class="ax"><div class="zero"></div><div class="bar" data-v="4.59"></div><div class="v" data-v="4.59">+4.6%</div></div></div>
+  <div class="dv" style="top:620px" data-in="3.0"><div class="m">Mixtral 8x7B<span>Q2_K</span></div><div class="ax"><div class="zero"></div><div class="bar" data-v="3.45"></div><div class="v" data-v="3.45">+3.4%</div></div></div>
+  <div class="dv" style="top:730px" data-in="3.5"><div class="m">Llama 3.1 8B<span>Q4_K_M</span></div><div class="ax"><div class="zero"></div><div class="bar" data-v="-1.2"></div><div class="v" data-v="-1.2">about −1%</div></div></div>
+  <div class="abs wide center" style="top:910px">
+    <div data-in="6.0" style="font-size:54px;font-weight:700;letter-spacing:-0.03em"><span class="g">3 of 4 faster.</span> Not just a laptop thing.</div>
+  </div>
+</section>
+
+<!-- 9. Johannes -->
+<section class="scene" id="s9">
+  <div class="date"><b>NOV 17</b> · SECOND REVIEW</div>
+  <div class="card" data-in="0.4">
+    <div class="top"><b>JohannesGaessler</b> commented · <span class="tag ok" style="font-size:20px;padding:6px 16px">Approved ✓</span></div>
+    <div class="body">
+      <div class="qt">Might be good to test this on a large Pascal GPU…</div>
+      “I checked the performance on a P40 in the relevant PR, found it to be worse, and made a suggestion for a corresponding check on the Github interface. However, <span class="hl" id="hl9">I got the logic wrong and that is why it ended up with <code>&lt;= GGML_CUDA_CC_PASCAL</code>.</span>”
+    </div>
+  </div>
+  <div class="abs wide center" style="top:900px">
+    <div data-in="6.0" style="font-size:50px;font-weight:700;letter-spacing:-0.03em">The person who wrote the check <span class="g">confirmed the root cause.</span></div>
+  </div>
+</section>
+
+<!-- 10. Merged -->
+<section class="scene center" id="s10">
+  <div data-in="0.3" id="mg"><span class="merged"><svg viewBox="0 0 16 16" fill="#fff"><path d="M5.45 5.154A4.25 4.25 0 0 0 9.25 7.5h1.378a2.251 2.251 0 1 1 0 1.5H9.25A5.734 5.734 0 0 1 5 7.123v3.505a2.25 2.25 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.95-.218ZM4.25 13.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5Zm8.5-4.5a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5ZM5 3.25a.75.75 0 1 0 0 .005V3.25Z"/></svg>Merged</span></div>
+  <div class="s" data-in="1.4" style="margin-top:44px;font-size:34px;color:#d2d2d7">ggml-org/llama.cpp · PR #32239 · Nov 17, 2026 · <span class="mono" style="font-size:30px">10152bc4a0</span></div>
+  <div class="s" data-in="2.2" style="margin-top:14px;font-size:30px">2 approvals · am17an · JohannesGaessler</div>
+  <div class="s" data-in="3.4" style="margin-top:60px;font-size:40px;color:#f5f5f7;font-weight:600">Every Pascal card now skips the slow path, as the check always meant to.</div>
+</section>
+
+<!-- 11. Outro -->
+<section class="scene" id="s11">
+  <div class="abs wide center" style="top:250px;gap:14px">
+    <div data-in="0.3" style="font-size:72px;font-weight:700;letter-spacing:-0.035em">Found it on a laptop.</div>
+    <div data-in="1.3" style="font-size:72px;font-weight:700;letter-spacing:-0.035em">Proved it with a profiler.</div>
+    <div data-in="2.3" style="font-size:72px;font-weight:700;letter-spacing:-0.035em">Proved it again on <span class="g">someone else's GPU.</span></div>
+  </div>
+  <div class="abs wide center" style="top:760px">
+    <div class="k" data-in="4.2" style="font-size:26px">MX230-LLM-ROOFLINE</div>
+    <div class="mono" data-in="4.6" style="font-size:30px;color:#a1a1a6;margin-top:16px">github.com/ggml-org/llama.cpp/pull/32239</div>
+  </div>
+</section>
+
+<script>
+const SC = [ // id, start, end (seconds)
+  ["s1", 0, 7], ["s2", 7, 15.5], ["s3", 15.5, 27], ["s4", 27, 38.5], ["s5", 38.5, 48.5],
+  ["s6", 48.5, 61], ["s7", 61, 74], ["s8", 74, 86], ["s9", 86, 96.5], ["s10", 96.5, 105], ["s11", 105, 113]];
+const DURATION = 113;
+const HITS = SC.slice(1).map(([id, s]) => [s, ["s5", "s8", "s10"].includes(id) ? 0.55 : 0.32]);
+const PULSE = [61, 105];
+
+const cl = (x, a = 0, b = 1) => Math.max(a, Math.min(b, x));
+const eo = x => 1 - Math.pow(1 - cl(x), 3);
+const eio = x => { x = cl(x); return x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; };
+const ramp = (lt, a, d) => eo((lt - a) / d);
+const lerp = (a, b, p) => a + (b - a) * p;
+const $ = id => document.getElementById(id);
+
+function sceneVis(lt, dur) { return eo(lt / 0.7) * (1 - eio((lt - (dur - 0.6)) / 0.6)); }
+
+const F = {
+  s1(lt, el) { el.style.transform = `scale(${lerp(1.05, 1, eo(lt / 7))})`; },
+  s2() {},
+  s3(lt) {
+    const MAX = 70, W = 1320;
+    const a = 43.9 * ramp(lt, 3.6, 1.6), b = 60.7 * ramp(lt, 4.6, 2.0);
+    $("b3a").style.width = (a / MAX * W) + "px"; $("v3a").textContent = a.toFixed(1) + " tok/s";
+    $("b3b").style.width = (b / MAX * W) + "px"; $("v3b").textContent = b.toFixed(1) + " tok/s";
+  },
+  s4() {}, s5() {},
+  s6(lt) { $("st6").style.transform = `scaleX(${ramp(lt, 8.0, 0.6)})`; },
+  s7() {},
+  s8(lt, el) {
+    const Z = 120, PX = 62; // zero line x, px per percent
+    el.querySelectorAll(".dv").forEach((row, i) => {
+      const bar = row.querySelector(".bar"), v = row.querySelector(".v"), val = +bar.dataset.v;
+      const p = ramp(lt, 2.4 + i * 0.5, 1.2), w = Math.abs(val) * PX * p;
+      bar.style.width = w + "px";
+      bar.style.left = (val >= 0 ? Z : Z - w) + "px";
+      bar.style.background = val >= 0 ? "linear-gradient(90deg,#76b900,#13c6b3)" : "#ff6b5e";
+      v.style.left = (val >= 0 ? Z + w + 22 : Z + 22) + "px";
+      v.style.color = val >= 0 ? "#f5f5f7" : "#ff8a80";
+      v.style.opacity = ramp(lt, 3.0 + i * 0.5, 0.6);
+    });
+  },
+  s9(lt) { $("hl9").style.backgroundSize = `${(ramp(lt, 2.6, 2.2) * 100).toFixed(1)}% 100%`; },
+  s10(lt) { $("mg").style.transform += ` scale(${lerp(0.9, 1, eo((lt - 0.3) / 1.2))})`; },
+  s11() {}
+};
+
+function renderAt(t) {
+  for (const [id, a, b] of SC) {
+    const el = $(id), lt = t - a, dur = b - a;
+    const vis = (lt < 0 || lt > dur) ? 0 : sceneVis(lt, dur);
+    if (vis <= 0) { el.style.visibility = "hidden"; el.style.opacity = 0; continue; }
+    el.style.visibility = "visible"; el.style.opacity = vis;
+    el.querySelectorAll("[data-in]").forEach(e => {
+      const p = ramp(lt, +e.dataset.in, 0.9);
+      e.style.opacity = p.toFixed(3);
+      e.style.transform = `translateY(${((1 - p) * 28).toFixed(2)}px)`;
+      e.style.filter = p < 1 ? `blur(${((1 - p) * 6).toFixed(2)}px)` : "none";
+    });
+    F[id](lt, el);
+  }
+}
+
+if (!location.search.includes("manual")) {
+  const t0 = performance.now();
+  (function loop() { renderAt(((performance.now() - t0) / 1000) % DURATION); requestAnimationFrame(loop); })();
+} else renderAt(0);
+</script>
+</body>
+</html>
